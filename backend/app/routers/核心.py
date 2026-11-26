@@ -1,9 +1,9 @@
 import json
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db import 夹具目录, 连接
-from app.services import 入轨, 分桶, 下发, 回读, 命运, 贯验, 目录
+from app.services import 入轨, 分桶, 下发, 回读, 命运, 贯验, 目录, 时间窗
 
 路由 = APIRouter(prefix="/api")
 
@@ -22,19 +22,45 @@ class 分桶请求(BaseModel):
 
 
 class 下发请求(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     票号: str = ""
     版本键: str
     桶键: str
     说明: str = ""
+    下发时: str = ""
 
 
 class 回读请求(BaseModel):
+    # 允许边缘时/中心时/偏移描述符等别名字段透传到服务层。
+    model_config = ConfigDict(extra="allow")
+
     证号: str = ""
     票号: str
     边缘键: str
     所见版本键: str = ""
     结果: str = "确认"
     说明: str = ""
+    边缘时: str = ""
+    中心时: str = ""
+    收证口径: str = ""
+    允许漂移秒: float | None = None
+
+
+class 时间窗策略请求(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    策略键: str = "默认"
+    收证口径: str = ""
+    口径: str = ""
+    允许漂移秒: float | None = None
+
+
+class 放量门请求(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    票号: str
+    要求边缘: list[str] | None = None
 
 
 class 回滚请求(BaseModel):
@@ -131,7 +157,8 @@ def 列下发(状态: str = ""):
 def 列回读():
     conn = 连接()
     try:
-        return [dict(r) for r in conn.execute("SELECT * FROM 回读证 ORDER BY 回读时 DESC LIMIT 200")]
+        rows = conn.execute("SELECT * FROM 回读证 ORDER BY 回读时 DESC LIMIT 200").fetchall()
+        return [时间窗.序列化回读(r) for r in rows]
     finally:
         conn.close()
 
@@ -191,6 +218,104 @@ def 做回读(体: 回读请求):
     return 回读.记回读(体.model_dump())
 
 
+# ---------------- 回读时间窗：策略 / 核证 / 正式确认集 / 放量门 ----------------
+
+@路由.get("/时间窗策略")
+@路由.get("/回读时间窗策略")
+def 取时间窗策略():
+    return 时间窗.读策略()
+
+
+@路由.post("/时间窗策略")
+@路由.post("/回读时间窗策略")
+def 设时间窗策略(体: 时间窗策略请求):
+    return 时间窗.写策略(体.model_dump(exclude_none=True))
+
+
+@路由.put("/时间窗策略")
+def 改时间窗策略(体: 时间窗策略请求):
+    return 时间窗.写策略(体.model_dump(exclude_none=True))
+
+
+@路由.post("/站规")
+async def 设站规(request: Request):
+    """兼容按键值切换口径：{"键":"...","值":"..."} 或整包 KV。"""
+    try:
+        体 = await request.json()
+    except Exception:
+        raise HTTPException(400, "站规请求需为 JSON")
+    conn = 连接()
+    try:
+        items: dict = {}
+        if isinstance(体, dict) and "键" in 体:
+            items = {str(体["键"]): str(体.get("值", ""))}
+        elif isinstance(体, dict):
+            items = {str(k): ("" if v is None else str(v)) for k, v in 体.items()}
+        else:
+            raise HTTPException(400, "站规请求需为 JSON 对象")
+        for k, v in items.items():
+            conn.execute(
+                "INSERT INTO 站规(键, 值) VALUES (?,?) "
+                "ON CONFLICT(键) DO UPDATE SET 值=excluded.值",
+                (k, v),
+            )
+        conn.commit()
+        return {"ok": True, "写入": items}
+    finally:
+        conn.close()
+
+
+@路由.get("/核证")
+@路由.get("/回读核证")
+def 核证列表(证号: str = "", 票号: str = "", 边缘键: str = "", 仅正式: bool = False):
+    return 时间窗.列核证(证号=证号, 票号=票号, 边缘键=边缘键, 仅正式=仅正式)
+
+
+@路由.get("/核证/{cid}")
+@路由.get("/回读核证/{cid}")
+def 核证单张(cid: str):
+    # 路径参数名必须 ASCII（Starlette 路径参数正则不收中文占位名），URL 形态不变。
+    return 时间窗.取核证(cid)
+
+
+@路由.post("/核证")
+def 核证试裁(体: dict):
+    """无状态三联裁决；给票号时自动补下发时。"""
+    return 时间窗.试裁决(体)
+
+
+@路由.get("/正式确认集")
+def 取正式确认集(票号: str = ""):
+    rows = 时间窗.正式确认集(票号=票号)
+    return {"票号": 票号, "数量": len(rows),
+            "证号集": [r["证号"] for r in rows], "正式确认集": rows}
+
+
+@路由.get("/放量门")
+def 取放量门(票号: str, 边缘: str = ""):
+    req = [x for x in 边缘.split(",") if x] if 边缘 else None
+    return 时间窗.评放量门(票号, req)
+
+
+@路由.post("/放量门")
+def 做放量门(体: 放量门请求):
+    return 时间窗.评放量门(体.票号, 体.要求边缘)
+
+
+@路由.get("/回读时间窗")
+def 回读时间窗总览(票号: str = ""):
+    """模块同名路由：当前策略 + 核证列表（及票级放量门，若给票号）。"""
+    out = {"策略": 时间窗.读策略(), "核证": 时间窗.列核证(票号=票号)}
+    if 票号:
+        out["放量门"] = 时间窗.评放量门(票号)
+    return out
+
+
+@路由.post("/回读时间窗")
+def 回读时间窗裁决(体: dict):
+    return 时间窗.试裁决(体)
+
+
 @路由.post("/回滚")
 def 做回滚(体: 回滚请求):
     return 命运.回滚票(体.model_dump())
@@ -217,6 +342,8 @@ def 装夹具(名: str = "入轨样例"):
         return 下发.装下发夹具(体)
     if 类型 == "回读":
         return 回读.装回读夹具(体)
+    if 类型 == "时间窗剧本":
+        return 时间窗.装剧本夹具(体)
     if 类型 == "回滚":
         return 命运.回滚票(体)
     raise HTTPException(400, f"未知夹具类型:{类型}")

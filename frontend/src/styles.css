@@ -293,6 +293,81 @@ td code, .mono {
 .徽章.通 { background: var(--通底); color: var(--通) }
 .徽章.败 { background: var(--败底); color: var(--败) }
 .徽章.信 { background: var(--信底); color: var(--信) }
+.徽章.警 { background: var(--警底); color: var(--警) }
+
+/* 回读时间窗 */
+.策略条 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 0.95rem;
+  background: var(--块);
+  border: 1px solid var(--线弱);
+  border-left: 3px solid var(--信);
+}
+.策略签 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--淡);
+  letter-spacing: 0.06em;
+}
+.策略漂 {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+  color: var(--淡);
+}
+.输入 {
+  flex: 1 1 260px;
+  min-width: 220px;
+  padding: 0.5rem 0.7rem;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--墨);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--线);
+  border-radius: 2px;
+}
+.输入:focus { outline: 2px solid rgba(15, 143, 134, 0.35); border-color: var(--信) }
+.门果 {
+  font-size: 0.85rem;
+  color: var(--墨);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.表卷 { overflow-x: auto; margin-bottom: 0.6rem }
+.时间表 { min-width: 900px }
+.时间表 td.时刻 { white-space: nowrap; font-size: 0.76rem; color: #24475f }
+.灰行 { opacity: 0.62; background: rgba(179, 58, 58, 0.035) }
+.灰行:hover { opacity: 0.9 }
+.裁决码 {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.74rem;
+  color: var(--淡);
+  margin-right: 0.3rem;
+}
+.小签 {
+  display: inline-block;
+  padding: 0 0.32rem;
+  margin: 0.1rem 0.15rem 0 0;
+  border-radius: 2px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-family: "IBM Plex Mono", monospace;
+}
+.小签.败签 { background: var(--败底); color: var(--败) }
+.淡 { color: var(--线) }
+.脚注 { margin-top: 0.8rem; font-size: 0.8rem; max-width: 52rem }
+.脚注 code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.76rem;
+  background: rgba(11, 39, 64, 0.06);
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+}
 
 @keyframes brand-in {
   from { opacity: 0; letter-spacing: 0.4em; transform: translateY(8px) }

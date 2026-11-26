@@ -1,12 +1,35 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.db import 连接
 from fastapi import HTTPException
 
+from app.modules.回读时间窗 import 解析时刻
+
 
 def 此刻() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _定下发热刻(体: dict) -> str:
+    """允许剧本/脚本显式给下发时，或用「下发于秒前」回拨，构造逆序夹具。"""
+    v = 体.get("下发时") or 体.get("dispatch_at")
+    dt = 解析时刻(v) if v not in (None, "") else None
+    if dt is not None:
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if 体.get("下发于秒前") not in (None, ""):
+        try:
+            dt = datetime.now(timezone.utc) - timedelta(seconds=float(体["下发于秒前"]))
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (TypeError, ValueError):
+            pass
+    if 体.get("下发偏移秒") not in (None, ""):
+        try:
+            dt = datetime.now(timezone.utc) + timedelta(seconds=float(体["下发偏移秒"]))
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (TypeError, ValueError):
+            pass
+    return 此刻()
 
 
 def 下一票(体: dict) -> dict:
@@ -28,12 +51,13 @@ def 下一票(体: dict) -> dict:
         已 = conn.execute("SELECT * FROM 下发票 WHERE 票号=?", (票号,)).fetchone()
         if 已 and 已["状态"] == "已下发":
             return {"票号": 票号, "状态": "已下发", "幂等": True}
+        下发时 = _定下发热刻(体)
         conn.execute(
             """INSERT INTO 下发票(票号, 开关键, 版本键, 桶键, 状态, 下发时, 世代, 说明)
                VALUES (?,?,?,?,?,?,?,?)
                ON CONFLICT(票号) DO UPDATE SET
                  状态='已下发', 下发时=excluded.下发时, 世代=下发票.世代+1""",
-            (票号, ver["开关键"], 版本键, 桶键, "已下发", 此刻(), 1, 体.get("说明", "")),
+            (票号, ver["开关键"], 版本键, 桶键, "已下发", 下发时, 1, 体.get("说明", "")),
         )
         conn.execute(
             "UPDATE 开关版本 SET 状态='灰度中' WHERE 版本键=?", (版本键,)
